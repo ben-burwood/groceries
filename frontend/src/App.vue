@@ -55,7 +55,6 @@
                         @toggle="toggleNeeded(grocery.uuid)"
                     />
                 </div>
-                <div></div>
             </div>
 
             <!-- Error Toast -->
