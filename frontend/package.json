@@ -17,7 +17,7 @@
     "@tailwindcss/vite": "^4.1.18",
     "tailwindcss": "^4.1.18",
     "theme-change": "^2.5.0",
-    "vue": "^3.5.26"
+    "vue": "^3.5.27"
   },
   "devDependencies": {
     "@tsconfig/node24": "^24.0.3",
