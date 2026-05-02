@@ -1,6 +1,10 @@
 <template>
     <div class="min-h-screen min-w-screen bg-base-200">
-        <ThemeSwitcher class="absolute top-4 right-4" />
+        <div class="absolute top-4 right-4 flex items-center gap-2">
+            <span v-if="!online" class="badge badge-warning">Offline</span>
+            <span v-else-if="pendingCount > 0" class="badge badge-info">Syncing {{ pendingCount }}…</span>
+            <ThemeSwitcher />
+        </div>
 
         <div class="flex flex-col items-center justify-center p-5 w-full max-w-lg mx-auto">
             <h1 class="text-4xl font-bold">Groceries</h1>
@@ -40,6 +44,7 @@
                             v-for="grocery in neededGroceries"
                             :key="grocery.uuid"
                             :groceryName="grocery.name"
+                            :class="{ 'opacity-60': grocery.pending }"
                             @toggle="toggleNeeded(grocery.uuid)"
                         />
                     </div>
@@ -52,6 +57,7 @@
                         v-for="grocery in possibleGroceries"
                         :key="grocery.uuid"
                         :groceryName="grocery.name"
+                        :class="{ 'opacity-60': grocery.pending }"
                         @toggle="toggleNeeded(grocery.uuid)"
                     />
                 </div>
@@ -79,9 +85,12 @@ import Grocery from "@/components/Grocery.vue";
 import Entry from "@/components/Entry.vue";
 import ThemeSwitcher from "@/components/ThemeSwitcher.vue";
 import { SERVER_URL } from "@/main";
+import * as offlineQueue from "@/services/offlineQueue";
+import * as cache from "@/services/groceriesCache";
+import { useOnline } from "@/composables/useOnline";
+import type { Grocery as GroceryType, GroceryItem } from "@/types/grocery";
 
 const errorMessage = ref("");
-// clear error after 5 seconds
 watch(errorMessage, (newError) => {
     if (newError) {
         setTimeout(() => {
@@ -90,53 +99,89 @@ watch(errorMessage, (newError) => {
     }
 });
 
-const allGroceries = ref<{ uuid: string; name: string }[]>([]);
-async function fetchAllGroceries() {
+const { online } = useOnline();
+const allGroceries = ref<GroceryItem[]>([]);
+const neededUuids = ref<Set<string>>(new Set());
+const pendingCount = ref(0);
+
+const neededGroceries = computed(() => allGroceries.value.filter((g) => neededUuids.value.has(g.uuid)));
+const possibleGroceries = computed(() => allGroceries.value.filter((g) => !neededUuids.value.has(g.uuid)));
+
+function mergePending(serverList: GroceryType[], pendingCreates: { uuid: string; name: string }[]): GroceryItem[] {
+    const seen = new Set(serverList.map((g) => g.uuid));
+    const known = serverList.map<GroceryItem>((g) => ({ ...g, needed: neededUuids.value.has(g.uuid) }));
+    const stillPending = pendingCreates
+        .filter((c) => !seen.has(c.uuid))
+        .map<GroceryItem>((c) => ({ ...c, needed: neededUuids.value.has(c.uuid), pending: true }));
+    return [...known, ...stillPending];
+}
+
+async function fetchGroceries() {
     try {
-        const res = await fetch(`${SERVER_URL}/groceries`);
-        allGroceries.value = await res.json();
-    } catch (error) {
+        const [allRes, needRes] = await Promise.all([fetch(`${SERVER_URL}/groceries`), fetch(`${SERVER_URL}/groceries/needed`)]);
+        if (!allRes.ok || !needRes.ok) throw new Error(`HTTP ${allRes.status}/${needRes.status}`);
+        const fresh: GroceryType[] = await allRes.json();
+        const needed: string[] = await needRes.json();
+        cache.saveAll(fresh);
+        cache.saveNeeded(needed);
+        const queue = offlineQueue.snapshot();
+        neededUuids.value = offlineQueue.applyNeededOverlay(needed, queue.needed);
+        allGroceries.value = mergePending(fresh, queue.creates);
+        pendingCount.value = offlineQueue.totalPending(queue);
+    } catch (error: any) {
+        if (!online.value) return;
         errorMessage.value = `Error: Fetching Groceries : ${error.message}`;
     }
 }
-onMounted(fetchAllGroceries);
 
-const neededGroceryUuids = ref<string[]>([]);
-async function fetchNeededGroceries() {
-    try {
-        const res = await fetch(`${SERVER_URL}/groceries/needed`);
-        neededGroceryUuids.value = await res.json();
-    } catch (error) {
-        errorMessage.value = `Error: Fetching Needed Groceries : ${error.message}`;
+async function flushQueue() {
+    if (!online.value) return;
+    const outcome = await offlineQueue.flush(SERVER_URL);
+    pendingCount.value = outcome.remaining;
+    if (outcome.rejected.length > 0) {
+        errorMessage.value = `Sync rejected ${outcome.rejected.length} op(s)`;
     }
 }
-onMounted(fetchNeededGroceries);
 
-const neededGroceries = computed(() => allGroceries.value.filter((grocery) => neededGroceryUuids.value.includes(grocery.uuid)));
-const possibleGroceries = computed(() => allGroceries.value.filter((grocery) => !neededGroceryUuids.value.includes(grocery.uuid)));
+async function syncWithServer() {
+    await flushQueue();
+    await fetchGroceries();
+}
 
 const groceryModal = ref<HTMLDialogElement | null>(null);
 
 async function addGrocery(name: string) {
-    try {
-        const res = await fetch(`${SERVER_URL}/groceries/create`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name }),
-        });
-        groceryModal.value?.close();
-        await fetchAllGroceries();
-    } catch (error) {
-        errorMessage.value = `Error: Adding Grocery : ${error.message}`;
-    }
+    const item: GroceryItem = { uuid: crypto.randomUUID(), name, needed: true, pending: true };
+    offlineQueue.enqueueCreate({ uuid: item.uuid, name: item.name });
+    offlineQueue.enqueueNeeded({ uuid: item.uuid, needed: true });
+    neededUuids.value = new Set([...neededUuids.value, item.uuid]);
+    allGroceries.value = [...allGroceries.value, item];
+    pendingCount.value = offlineQueue.totalPending();
+    groceryModal.value?.close();
+    if (online.value) await syncWithServer();
 }
 
 async function toggleNeeded(uuid: string) {
-    try {
-        const res = await fetch(`${SERVER_URL}/groceries/${uuid}/needed`, { method: "PUT" });
-        await fetchNeededGroceries();
-    } catch (error) {
-        errorMessage.value = `Error: Toggling Needed : ${error.message}`;
-    }
+    const desired = !neededUuids.value.has(uuid);
+    offlineQueue.enqueueNeeded({ uuid, needed: desired });
+    const next = new Set(neededUuids.value);
+    if (desired) next.add(uuid);
+    else next.delete(uuid);
+    neededUuids.value = next;
+    pendingCount.value = offlineQueue.totalPending();
+    if (online.value) await syncWithServer();
 }
+
+watch(online, (isOnline) => {
+    if (isOnline) syncWithServer();
+});
+
+onMounted(async () => {
+    // Hydrate from cache first so the UI paints instantly even when offline.
+    const queue = offlineQueue.snapshot();
+    neededUuids.value = offlineQueue.applyNeededOverlay(cache.loadNeeded(), queue.needed);
+    allGroceries.value = mergePending(cache.loadAll(), queue.creates);
+    pendingCount.value = offlineQueue.totalPending(queue);
+    if (online.value) await syncWithServer();
+});
 </script>

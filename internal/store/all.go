@@ -24,14 +24,28 @@ func ListAll() ([]grocery.Grocery, error) {
 	return groceries, nil
 }
 
-// Create adds a new grocery.
-func Create(newGrocery grocery.Grocery) (*grocery.Grocery, error) {
-	_, err := db.Exec(
-		`INSERT INTO groceries (uuid, name) VALUES (?, ?)`,
+// CreateOrGet inserts the grocery if its UUID is new, otherwise returns the
+// existing row. The bool reports whether a new row was created.
+func CreateOrGet(newGrocery grocery.Grocery) (*grocery.Grocery, bool, error) {
+	res, err := db.Exec(
+		`INSERT INTO groceries (uuid, name) VALUES (?, ?) ON CONFLICT(uuid) DO NOTHING`,
 		newGrocery.UUID, newGrocery.Name,
 	)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return &newGrocery, nil
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return nil, false, err
+	}
+	if affected == 1 {
+		return &newGrocery, true, nil
+	}
+
+	var existing grocery.Grocery
+	existing.UUID = newGrocery.UUID
+	if err := db.QueryRow(`SELECT name FROM groceries WHERE uuid = ?`, newGrocery.UUID).Scan(&existing.Name); err != nil {
+		return nil, false, err
+	}
+	return &existing, false, nil
 }

@@ -17,7 +17,7 @@ func main() {
 	webMux.HandleFunc("GET /groceries", api.ListAllGroceries)
 	webMux.HandleFunc("POST /groceries/create", api.CreateGrocery)
 	webMux.HandleFunc("GET /groceries/needed", api.ListNeededGroceries)
-	webMux.HandleFunc("PUT /groceries/{uuid}/needed", api.ToggleNeededGrocery)
+	webMux.HandleFunc("PUT /groceries/{uuid}/needed", api.SetNeededGrocery)
 	// Serve Static Frontend
 	webMux.Handle("/", http.FileServer(http.Dir("./frontend/dist")))
 

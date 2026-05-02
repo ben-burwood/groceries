@@ -23,25 +23,19 @@ func ListNeeded() ([]grocery.GroceryUUID, error) {
 	return needed, nil
 }
 
-func ToggleNeeded(groceryUUID grocery.GroceryUUID) error {
-	tx, err := db.Begin()
-	if err != nil {
+// SetNeeded marks a grocery as needed (true) or not needed (false). Both
+// directions are idempotent. A FK violation propagates back to the caller so
+// the API layer can surface it as 409 — that happens when the UUID isn't yet
+// in the groceries table (e.g. a queued setNeeded sync arrives before its
+// matching create).
+func SetNeeded(groceryUUID grocery.GroceryUUID, needed bool) error {
+	if needed {
+		_, err := db.Exec(
+			`INSERT INTO needed_groceries (uuid) VALUES (?) ON CONFLICT(uuid) DO NOTHING`,
+			groceryUUID,
+		)
 		return err
 	}
-	defer tx.Rollback()
-
-	res, err := tx.Exec(`DELETE FROM needed_groceries WHERE uuid = ?`, groceryUUID)
-	if err != nil {
-		return err
-	}
-	deleted, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if deleted == 0 {
-		if _, err := tx.Exec(`INSERT INTO needed_groceries (uuid) VALUES (?)`, groceryUUID); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
+	_, err := db.Exec(`DELETE FROM needed_groceries WHERE uuid = ?`, groceryUUID)
+	return err
 }
