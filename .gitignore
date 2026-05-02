@@ -1,2 +1,3 @@
-store/all.json
-store/need.json
+store/*.db
+store/*.db-wal
+store/*.db-shm

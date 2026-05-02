@@ -1,76 +1,47 @@
 package store
 
-import (
-	"encoding/json"
-	"groceries/internal/grocery"
-	"os"
-	"sync"
-)
+import "groceries/internal/grocery"
 
-const GroceryNeedStoreFile = "store/need.json"
-
-var needMu sync.Mutex
-
-// loadNeededGroceries reads the groceries from the JSON file
-func loadNeededGroceries() ([]grocery.GroceryUUID, error) {
-	file, err := os.Open(GroceryNeedStoreFile)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return []grocery.GroceryUUID{}, nil // treat as empty list if file doesn't exist
-		}
-		return nil, err
-	}
-	defer file.Close()
-
-	var groceries []grocery.GroceryUUID
-	decoder := json.NewDecoder(file)
-	if err := decoder.Decode(&groceries); err != nil && err.Error() != "EOF" {
-		return nil, err
-	}
-	return groceries, nil
-}
-
-// saveNeededGroceries writes the groceries to the JSON file
-func saveNeededGroceries(groceries []grocery.GroceryUUID) error {
-	if err := os.MkdirAll("store", os.ModePerm); err != nil {
-		return err
-	}
-
-	file, err := os.Create(GroceryNeedStoreFile)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	encoder := json.NewEncoder(file)
-	encoder.SetIndent("", "  ")
-	return encoder.Encode(groceries)
-}
-
-// ListNeeded returns all needed groceries.
 func ListNeeded() ([]grocery.GroceryUUID, error) {
-	needMu.Lock()
-	defer needMu.Unlock()
-	return loadNeededGroceries()
+	rows, err := db.Query(`SELECT uuid FROM needed_groceries`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	needed := []grocery.GroceryUUID{}
+	for rows.Next() {
+		var u grocery.GroceryUUID
+		if err := rows.Scan(&u); err != nil {
+			return nil, err
+		}
+		needed = append(needed, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return needed, nil
 }
 
-// ToggleNeeded toggles a grocery as needed.
 func ToggleNeeded(groceryUUID grocery.GroceryUUID) error {
-	needMu.Lock()
-	defer needMu.Unlock()
-
-	groceries, err := loadNeededGroceries()
+	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
+	defer tx.Rollback()
 
-	for i, uuid := range groceries {
-		if uuid == groceryUUID {
-			// Grocery was needed, remove from list to mark as got
-			groceries = append(groceries[:i], groceries[i+1:]...)
-			return saveNeededGroceries(groceries)
+	res, err := tx.Exec(`DELETE FROM needed_groceries WHERE uuid = ?`, groceryUUID)
+	if err != nil {
+		return err
+	}
+	deleted, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if deleted == 0 {
+		if _, err := tx.Exec(`INSERT INTO needed_groceries (uuid) VALUES (?)`, groceryUUID); err != nil {
+			return err
 		}
 	}
-	groceries = append(groceries, groceryUUID)
-	return saveNeededGroceries(groceries)
+	return tx.Commit()
 }
