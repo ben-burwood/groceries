@@ -10,6 +10,9 @@ export default defineConfig({
     vue(),
     tailwindcss(),
     VitePWA({
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.ts',
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'pwa-icon.svg'],
       manifest: {
@@ -35,13 +38,8 @@ export default defineConfig({
           },
         ],
       },
-      workbox: {
+      injectManifest: {
         globPatterns: ['**/*.{js,css,html,svg,ico,png,woff2}'],
-        navigateFallback: '/index.html',
-        // Don't cache /groceries* API responses — JS layer owns offline behavior
-        // for those, and SW caching would mask real network state.
-        navigateFallbackDenylist: [/^\/groceries/],
-        runtimeCaching: [],
       },
     }),
   ],

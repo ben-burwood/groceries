@@ -85,6 +85,7 @@ import Grocery from "@/components/Grocery.vue";
 import Entry from "@/components/Entry.vue";
 import ThemeSwitcher from "@/components/ThemeSwitcher.vue";
 import { SERVER_URL } from "@/main";
+import { apiFetch, AuthRedirectError } from "@/services/api";
 import * as offlineQueue from "@/services/offlineQueue";
 import * as cache from "@/services/groceriesCache";
 import { useOnline } from "@/composables/useOnline";
@@ -118,7 +119,7 @@ function mergePending(serverList: GroceryType[], pendingCreates: { uuid: string;
 
 async function fetchGroceries() {
     try {
-        const [allRes, needRes] = await Promise.all([fetch(`${SERVER_URL}/groceries`), fetch(`${SERVER_URL}/groceries/needed`)]);
+        const [allRes, needRes] = await Promise.all([apiFetch(`${SERVER_URL}/groceries`), apiFetch(`${SERVER_URL}/groceries/needed`)]);
         if (!allRes.ok || !needRes.ok) throw new Error(`HTTP ${allRes.status}/${needRes.status}`);
         const fresh: GroceryType[] = await allRes.json();
         const needed: string[] = await needRes.json();
@@ -129,6 +130,7 @@ async function fetchGroceries() {
         allGroceries.value = mergePending(fresh, queue.creates);
         pendingCount.value = offlineQueue.totalPending(queue);
     } catch (error: any) {
+        if (error instanceof AuthRedirectError) return;
         if (!online.value) return;
         errorMessage.value = `Error: Fetching Groceries : ${error.message}`;
     }

@@ -1,5 +1,6 @@
 import type { PendingCreate, PendingNeeded } from "@/types/grocery";
 import { readJSONArray, writeJSON } from "@/services/storage";
+import { apiFetch } from "@/services/api";
 
 const CREATES_KEY = "pending_creates";
 const NEEDED_KEY = "pending_needed";
@@ -109,7 +110,7 @@ export async function flush(serverUrl: string): Promise<FlushOutcome> {
         listCreates(),
         "create",
         (c) =>
-            fetch(`${serverUrl}/groceries/create`, {
+            apiFetch(`${serverUrl}/groceries/create`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ uuid: c.uuid, name: c.name }),
@@ -132,7 +133,7 @@ export async function flush(serverUrl: string): Promise<FlushOutcome> {
         listNeeded(),
         "needed",
         (op) =>
-            fetch(`${serverUrl}/groceries/${op.uuid}/needed`, {
+            apiFetch(`${serverUrl}/groceries/${op.uuid}/needed`, {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ needed: op.needed }),
