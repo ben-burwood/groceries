@@ -1,7 +1,7 @@
 <template>
     <label class="swap swap-rotate">
         <!-- this hidden checkbox controls the state -->
-        <input type="checkbox" class="theme-controller" value="synthwave" data-toggle-theme="dark" />
+        <input type="checkbox" :checked="isDark" data-toggle-theme="dark,light" />
 
         <!-- sun icon -->
         <svg class="swap-off h-8 w-8 fill-current" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
@@ -20,10 +20,16 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted } from "vue";
+import { onMounted, ref } from "vue";
 import { themeChange } from "theme-change";
 
+const isDark = ref(false);
+
 onMounted(() => {
+    const theme =
+        localStorage.getItem("theme") ?? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    document.documentElement.setAttribute("data-theme", theme);
+    isDark.value = theme === "dark";
     themeChange(false);
 });
 </script>
